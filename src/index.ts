@@ -2,11 +2,11 @@ import { TextMessage, WebhookEvent } from "@line/bot-sdk";
 import { Hono } from "hono";
 
 type Bindings = {
-  DB: D1Database;
   QUEUE: Queue;
   CHANNEL_ACCESS_TOKEN: string;
   CHANNEL_SECRET: string;
   OPENAI_API_KEY: string;
+  LINE_GPT_KV: KVNamespace;
 };
 
 type Role = "user" | "system" | "assistant";
@@ -55,7 +55,6 @@ type ChatGPTResponse = {
 const app = new Hono<{ Bindings: Bindings }>();
 
 app.post("/api/webhook", async (c) => {
-  // Extract From Request Body
   const data = await c.req.json<RequestBody>();
   const event = data.events[0];
   if (event.type !== "message" || event.message.type !== "text") {
@@ -83,19 +82,28 @@ export default {
     const queueMessages = JSON.parse(messages) as QueueMessage[];
     for await (const message of queueMessages) {
       const { userId, content, replyToken } = message.body;
-      // DBに登録する
-      await env.DB.prepare(
-        `insert into messages(user_id, role, content) values (?, "user", ?)`
-      )
-        .bind(userId, content)
-        .run();
-      // DBを参照する
-      const { results } = await env.DB.prepare(
-        `select role, content from messages where user_id = ?1 order by id`
-      )
-        .bind(userId)
-        .all<ChatGPTRequestMessage>();
-      const chatGPTcontents = results ?? [];
+      // KVに登録する
+      const now = new Date();
+      await env.LINE_GPT_KV.put(
+        `${userId}:${now.getTime()}`,
+        JSON.stringify({ role: "user", content }),
+        { expirationTtl: 60 * 60 * 6 }
+      );
+
+      // KVを参照する
+      const { keys } = await env.LINE_GPT_KV.list({
+        prefix: `${userId}:`,
+        limit: 20,
+      });
+
+      const chatGPTcontents = [];
+      for (const key of keys) {
+        const value = await env.LINE_GPT_KV.get(key.name, "json");
+        if (value) {
+          chatGPTcontents.push(value);
+        }
+      }
+
       try {
         const res = await fetch("https://api.openai.com/v1/chat/completions", {
           method: "post",
@@ -109,12 +117,18 @@ export default {
           }),
         });
         const body = await res.json<ChatGPTResponse>();
-        // DBに登録する
-        await env.DB.prepare(
-          `insert into messages(user_id, role, content) values (?, "assistant", ?)`
-        )
-          .bind(userId, body.choices[0].message.content)
-          .run();
+
+        // KVに登録する
+        const now = new Date();
+        await env.LINE_GPT_KV.put(
+          `${userId}:${now.getTime()}`,
+          JSON.stringify({
+            role: "assistant",
+            content: body.choices[0].message.content,
+          }),
+          { expirationTtl: 60 * 60 * 6 }
+        );
+
         const accessToken: string = env.CHANNEL_ACCESS_TOKEN;
         const response: TextMessage = {
           type: "text",
