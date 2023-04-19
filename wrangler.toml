@@ -1,0 +1,17 @@
+name = "okym-fam-line-gpt"
+main = "src/index.ts"
+compatibility_date = "2023-04-14"
+
+[[ d1_databases ]]
+binding = "DB"
+database_name = "cloudflare-linebot-chatgpt-api-db"
+database_id = "79e25037-0a04-417a-975b-73a4d8ce3814"
+
+[[queues.producers]]
+queue = "cloudflare-linebot-chatgpt-api-queue"
+binding = "QUEUE"
+
+[[queues.consumers]]
+queue = "cloudflare-linebot-chatgpt-api-queue"
+max_batch_size = 10
+max_batch_timeout = 1
