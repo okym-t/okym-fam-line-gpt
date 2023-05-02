@@ -112,8 +112,10 @@ export default {
             Authorization: `Bearer ${env.OPENAI_API_KEY}`,
           },
           body: JSON.stringify({
-            model: "gpt-3.5-turbo",
+            model: "gpt-4",
+            // model: "gpt-3.5-turbo",
             messages: chatGPTcontents,
+            temperature: 0.8,
           }),
         });
         const body = await res.json<ChatGPTResponse>();
